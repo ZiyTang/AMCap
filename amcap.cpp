@@ -6,27 +6,24 @@
 //
 // Copyright (c) Microsoft Corporation.  All rights reserved.
 //------------------------------------------------------------------------------
-#include <atlbase.h>
-#include <commdlg.h>
+
+#include <streams.h>
+
+#include <windows.h>
 #include <dbt.h>
-#include <fcntl.h>
-#include <io.h>
 #include <mmreg.h>
 #include <msacm.h>
+#include <fcntl.h>
+#include <io.h>
 #include <stdio.h>
-#include <windows.h>
-// atl
+#include <commdlg.h>
 #include <atlbase.h>
-#include <atlstr.h>
-//strmbasd
-#include <streams.h>
-//project
-#include "amcap.h"
-#include "crossbar.h"
-#include "rev.h"
-#include "SampleCGB.h"
-#include "status.h"
+#include <strsafe.h>
 #include "stdafx.h"
+#include "amcap.h"
+#include "status.h"
+#include "crossbar.h"
+#include "SampleCGB.h"
 
 //------------------------------------------------------------------------------
 // Macros
@@ -44,6 +41,7 @@
 #define REGISTER_FILTERGRAPH
 #endif
 
+
 //------------------------------------------------------------------------------
 // Global data
 //------------------------------------------------------------------------------
@@ -51,11 +49,8 @@ HINSTANCE ghInstApp=0;
 HACCEL ghAccel=0;
 HFONT  ghfontApp=0;
 TEXTMETRIC gtm={0};
-TCHAR gszAppName[]=TEXT("AMCap");
-DWORD ghwndStyle = (WS_OVERLAPPEDWINDOW|WS_SYSMENU|WS_VISIBLE);
+TCHAR gszAppName[]=TEXT("AMCAP");
 HWND ghwndApp=0, ghwndStatus=0;
-HMENU ghmenuApp=0;
-BOOL bIsZoomed;
 HDEVNOTIFY ghDevNotify=0;
 PUnregisterDeviceNotification gpUnregisterDeviceNotification=0;
 PRegisterDeviceNotification gpRegisterDeviceNotification=0;
@@ -94,8 +89,6 @@ struct _capstuff
     IMoniker *pmVideo;
     IMoniker *pmAudio;
     double FrameRate;
-	int CaptureWidth;
-	int CaptureHeight;
     BOOL fWantPreview;
     long lCapStartTime;
     long lCapStopTime;
@@ -124,6 +117,8 @@ struct _capstuff
     HMENU hMenuPopup;
     int iNumVCapDevices;
 } gcap;
+
+
 
 // implements IAMCopyCaptureFileProgress
 //
@@ -163,7 +158,7 @@ class CProgress : public CUnknown, public IAMCopyCaptureFileProgress
     STDMETHODIMP Progress(int i)
     {
         TCHAR tach[80];
-        wsprintf(tach, TEXT("Save File Progress: %d%%\0"), i);
+        HRESULT hr = StringCchPrintf(tach, 80, TEXT("Save File Progress: %d%%\0"), i);
         statusUpdateStatus(ghwndStatus, tach);
         return S_OK;
     };
@@ -200,7 +195,6 @@ void AddDevicesToMenu();
 void ChooseDevices(TCHAR *szVideo, TCHAR *szAudio);
 void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio);
 void ChooseFrameRate();
-void ReadVideoPin();
 
 BOOL InitCapFilters();
 void FreeCapFilters();
@@ -208,8 +202,6 @@ void FreeCapFilters();
 BOOL StopPreview();
 BOOL StartPreview();
 BOOL StopCapture();
-void FullScreen();
-void ResizeChild(int sw, int sh);
 
 DWORDLONG GetSize(LPCTSTR tach);
 void MakeMenuOptions();
@@ -219,6 +211,7 @@ void OnClose();
 // allowing GraphEdit to "spy" on a remote filter graph if enabled.
 HRESULT AddGraphToRot(IUnknown *pUnkGraph, DWORD *pdwRegister);
 void RemoveGraphFromRot(DWORD pdwRegister);
+
 
 //------------------------------------------------------------------------------
 // Name: SetAppCaption()
@@ -231,42 +224,10 @@ void SetAppCaption()
     lstrcpyn(tach, gszAppName, NUMELMS(tach));
     if(gcap.szCaptureFile[0] != 0)
     {
-        lstrcat(tach, TEXT(" - "));
-        lstrcat(tach, gcap.szCaptureFile);
+        HRESULT hr = StringCchCat(tach, _MAX_PATH + 80, TEXT(" - "));
+        hr = StringCchCat(tach, _MAX_PATH + 80, gcap.szCaptureFile);
     }
     SetWindowText(ghwndApp, tach);
-}
-
-//print help
-void usage() {
-	wprintf(L"Usage: amcap [-v]\n-v, --version\tprint version\n");
-}
-
-//parse arguments
-bool parse_arguments() {
-	LPWSTR *argv;
-	int argc;
-
-	argv = CommandLineToArgvW(GetCommandLine(), &argc);
-	if (argv == NULL)
-	{
-		wprintf(L"Unable to parse command line\n");
-		return false;
-	}
-
-	if (argc > 1) {
-		CString s(argv[1]);
-		if (!s.Compare(L"-v") || !s.Compare(L"--version")) {
-			wprintf(L"%s %s\n", TEXT(VER_DATE), TEXT(VER));
-		} else {
-			wprintf(L"Invalid argument.\n\n");
-			usage();
-		}
-		return false;
-	}
-
-	LocalFree(argv);
-	return true;
 }
 
 
@@ -310,7 +271,7 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
         cls.hIcon          = LoadIcon(hInst, TEXT("AMCapIcon"));
         cls.lpszMenuName   = MAKEINTATOM(ID_APP);
         cls.lpszClassName  = MAKEINTATOM(ID_APP);
-        cls.hbrBackground  = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        cls.hbrBackground  = (HBRUSH)(COLOR_WINDOW + 1);
         cls.hInstance      = hInst;
         cls.style          = CS_BYTEALIGNCLIENT | CS_VREDRAW | CS_HREDRAW | CS_DBLCLKS;
         cls.lpfnWndProc    = (WNDPROC) AppWndProc;
@@ -332,7 +293,7 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
                             MAKEINTATOM(ID_APP),    // Class name
                             gszAppName,             // Caption
                             // Style bits
-							ghwndStyle,
+                            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                             CW_USEDEFAULT, 0,       // Position
                             320,300,                // Size
                             (HWND)NULL,             // Parent window (no parent)
@@ -356,10 +317,12 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
     if(ghwndStatus == NULL)
         return(FALSE);
 
+    ShowWindow(ghwndApp,sw);
+
     // Read the capture file name from win.ini
     GetProfileString(TEXT("annie"), TEXT("CaptureFile"), TEXT(""),
         gcap.szCaptureFile,
-        sizeof(gcap.szCaptureFile));
+        NUMELMS(gcap.szCaptureFile));
 
     // Read the list of devices to use from win.ini
     ZeroMemory(gcap.rgpmAudioMenu, sizeof(gcap.rgpmAudioMenu));
@@ -398,8 +361,6 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
     int units_per_frame = GetProfileInt(TEXT("annie"), TEXT("FrameRate"), 666667);  // 15fps
     gcap.FrameRate = 10000000. / units_per_frame;
     gcap.FrameRate = (int)(gcap.FrameRate * 100) / 100.;
-	gcap.CaptureWidth  = GetProfileInt(TEXT("annie"), TEXT("CaptureWidth"), 640);
-	gcap.CaptureHeight  = GetProfileInt(TEXT("annie"), TEXT("CaptureHeight"), 360);
 
     // reasonable default
     if(gcap.FrameRate <= 0.)
@@ -410,7 +371,7 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
 
     // Instantiate the capture filters we need to do the menu items.
     // This will start previewing, if desired
-    // 
+    //
     // Make these the official devices we're using
 
     ChooseDevices(szVideoDisplayName, szAudioDisplayName);
@@ -441,7 +402,7 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
             "RegisterDeviceNotificationA"
 #endif
         );
-        
+
         // failures expected on older platforms.
         ASSERT(gpRegisterDeviceNotification && gpUnregisterDeviceNotification ||
               !gpRegisterDeviceNotification && !gpUnregisterDeviceNotification);
@@ -456,9 +417,6 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
     }
 
     SetAppCaption();
-
-    ShowWindow(ghwndApp,sw);
-
     return TRUE;
 }
 
@@ -493,8 +451,6 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
 {
     MSG msg;
 
-	if (!parse_arguments()) return 0;
-
     /* Call initialization procedure */
     if(!AppInit(hInst,hPrev,sw))
         return FALSE;
@@ -526,6 +482,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
     CoUninitialize();
     return ((int) msg.wParam);
 }
+
 
 /*----------------------------------------------------------------------------*\
 |   AppWndProc( hwnd, uiMessage, wParam, lParam )                              |
@@ -561,11 +518,11 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case WM_INITMENU:
             // we can start capture if not capturing already
-            EnableMenuItem((HMENU)wParam, MENU_START_CAP, 
+            EnableMenuItem((HMENU)wParam, MENU_START_CAP,
                 (!gcap.fCapturing) ? MF_ENABLED : MF_GRAYED);
-                
+
             // we can stop capture if it's currently capturing
-            EnableMenuItem((HMENU)wParam, MENU_STOP_CAP, 
+            EnableMenuItem((HMENU)wParam, MENU_STOP_CAP,
                 (gcap.fCapturing) ? MF_ENABLED : MF_GRAYED);
 
             // We can bring up a dialog if the graph is stopped
@@ -604,15 +561,15 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             // toggles capturing audio or not - can't be capturing right now
             // and we must have an audio capture device created
-            EnableMenuItem((HMENU)wParam, MENU_CAP_AUDIO, 
+            EnableMenuItem((HMENU)wParam, MENU_CAP_AUDIO,
                 (!gcap.fCapturing && gcap.pACap) ? MF_ENABLED : MF_GRAYED);
             // are we capturing audio?
-            CheckMenuItem((HMENU)wParam, MENU_CAP_AUDIO, 
+            CheckMenuItem((HMENU)wParam, MENU_CAP_AUDIO,
                 (gcap.fCapAudio) ? MF_CHECKED : MF_UNCHECKED);
             // are we doing closed captioning?
-            CheckMenuItem((HMENU)wParam, MENU_CAP_CC, 
+            CheckMenuItem((HMENU)wParam, MENU_CAP_CC,
                 (gcap.fCapCC) ? MF_CHECKED : MF_UNCHECKED);
-            EnableMenuItem((HMENU)wParam, MENU_CAP_CC, 
+            EnableMenuItem((HMENU)wParam, MENU_CAP_CC,
                 (gcap.fCCAvail) ? MF_ENABLED : MF_GRAYED);
             // change audio formats when not capturing
             EnableMenuItem((HMENU)wParam, MENU_AUDIOFORMAT, (gcap.fCapAudio &&
@@ -635,14 +592,14 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             EnableMenuItem((HMENU)wParam, MENU_SAVE_CAP_FILE,
                 !gcap.fCapturing ? MF_ENABLED : MF_GRAYED);
             // do we want preview?
-            CheckMenuItem((HMENU)wParam, MENU_PREVIEW, 
+            CheckMenuItem((HMENU)wParam, MENU_PREVIEW,
                 (gcap.fWantPreview) ? MF_CHECKED : MF_UNCHECKED);
             // can toggle preview if not capturing
             EnableMenuItem((HMENU)wParam, MENU_PREVIEW,
                 !gcap.fCapturing ? MF_ENABLED : MF_GRAYED);
 
             // MPEG2 enabled ?
-            CheckMenuItem((HMENU)wParam, MENU_MPEG2, 
+            CheckMenuItem((HMENU)wParam, MENU_MPEG2,
                 (gcap.fMPEG2) ? MF_CHECKED : MF_UNCHECKED);
 
             // can toggle MPEG2 if not capturing
@@ -654,15 +611,15 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             // capturing audio
             EnableMenuItem((HMENU)wParam, MENU_NOMASTER,
                 (!gcap.fCapturing && gcap.fCapAudio) ? MF_ENABLED : MF_GRAYED);
-            CheckMenuItem((HMENU)wParam, MENU_NOMASTER, 
+            CheckMenuItem((HMENU)wParam, MENU_NOMASTER,
                 (gcap.iMasterStream == -1) ? MF_CHECKED : MF_UNCHECKED);
             EnableMenuItem((HMENU)wParam, MENU_AUDIOMASTER,
                 (!gcap.fCapturing && gcap.fCapAudio) ? MF_ENABLED : MF_GRAYED);
-            CheckMenuItem((HMENU)wParam, MENU_AUDIOMASTER, 
+            CheckMenuItem((HMENU)wParam, MENU_AUDIOMASTER,
                 (gcap.iMasterStream == 1) ? MF_CHECKED : MF_UNCHECKED);
             EnableMenuItem((HMENU)wParam, MENU_VIDEOMASTER,
                 (!gcap.fCapturing && gcap.fCapAudio) ? MF_ENABLED : MF_GRAYED);
-            CheckMenuItem((HMENU)wParam, MENU_VIDEOMASTER, 
+            CheckMenuItem((HMENU)wParam, MENU_VIDEOMASTER,
                 (gcap.iMasterStream == 0) ? MF_CHECKED : MF_UNCHECKED);
 
             // can't select a new capture device when capturing
@@ -765,20 +722,7 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     StartPreview();
                 }
             }
-			switch(LOWORD( wParam ))
-			{
-				case VK_SPACE:
-					SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(MENU_PREVIEW, 0), 0);
-					break;
-				case VK_ESCAPE:
-					FullScreen();
-					break;
-			}
             break;
-
-		case WM_LBUTTONDBLCLK:
-			FullScreen();
-			break;
 
         case WM_PAINT:
             hdc = BeginPaint(hwnd,&ps);
@@ -819,14 +763,12 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             cxBorder = GetSystemMetrics(SM_CXBORDER);
             cyBorder = GetSystemMetrics(SM_CYBORDER);
             cy = statusGetHeight() + cyBorder;
-			if (GetWindowLong(ghwndStatus, GWL_STYLE) & WS_VISIBLE)
-			{
-				MoveWindow(ghwndStatus, -cxBorder, rc.bottom - cy,
-					rc.right + (2 * cxBorder), cy + cyBorder, TRUE);
-					rc.bottom -= cy;
-			}
+            MoveWindow(ghwndStatus, -cxBorder, rc.bottom - cy,
+                rc.right + (2 * cxBorder), cy + cyBorder, TRUE);
+            rc.bottom -= cy;
             // this is the video renderer window showing the preview
-                ResizeChild(rc.right, rc.bottom);
+            if(gcap.pVW)
+                gcap.pVW->SetWindowPosition(0, 0, rc.right, rc.bottom);
             break;
 
         case WM_FGNOTIFY:
@@ -866,7 +808,7 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                                         bAbort = FALSE;
                                         StopCapture();
                                         TCHAR szError[100];
-                                        _tcscpy(szError, 
+                                        HRESULT hr = StringCchCopy(szError, 100,
                                             TEXT("Stopping Capture (Device Lost). Select New Capture Device\0"));
                                         ErrMsg(szError);
                                         break;
@@ -884,7 +826,7 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                             StartPreview();
                         }
                         TCHAR szError[100];
-                        wsprintf(szError, TEXT("ERROR during capture, error code=%08x\0"), hrAbort);
+                        HRESULT hr = StringCchPrintf(szError, 100, TEXT("ERROR during capture, error code=%08x\0"), hrAbort);
                         ErrMsg(szError);
                 }
             }
@@ -934,7 +876,7 @@ BOOL MakeBuilder()
     {
         return FALSE;
     }
-    
+
     return TRUE;
 }
 
@@ -979,7 +921,6 @@ void ResizeWindow(int w, int h)
 
     rcC.right = w;
     rcC.bottom = h;
-	
     SetWindowPos(ghwndApp, NULL, 0, 0, rcC.right + xExtra,
         rcC.bottom + yExtra, SWP_NOZORDER | SWP_NOMOVE);
 
@@ -991,67 +932,8 @@ void ResizeWindow(int w, int h)
         ResizeWindow(w,h);
 
     gnRecurse--;
-
-	ResizeChild(rcC.right + xExtra, rcC.bottom + yExtra);
 }
 
-void ResizeChild(int sw, int sh)
-{
-	int nw = 0, nh = 0, w = 0, h = 0, l = 0, t = 0;
-	
-	ReadVideoPin();
-
-	if ((float)sw/(float)sh > (float)gcap.CaptureWidth/(float)gcap.CaptureHeight)
-	{
-		nw = sh * ((float)gcap.CaptureWidth/(float)gcap.CaptureHeight);
-		int hspace = sw - nw;
-		l = hspace / 2;
-		w = nw;
-		h = sh;
-	}
-	else
-	{
-		nh = sw / ((float)gcap.CaptureWidth/(float)gcap.CaptureHeight);
-		int vspace = sh - nh;
-		t = vspace / 2;
-		h = nh;
-		w = sw;
-	}
-
-	if(gcap.pVW)
-		gcap.pVW->SetWindowPosition(l, t, w, h);
-}
-
-void FullScreen()
-{
-	if (GetWindowLong(ghwndApp, GWL_STYLE) & WS_OVERLAPPEDWINDOW)
-	{
-		// save window state
-		bIsZoomed = IsZoomed(ghwndApp);
-		ghmenuApp = GetMenu(ghwndApp);
-		ShowWindow(ghwndStatus, SW_HIDE);
-		SetMenu(ghwndApp, NULL);
-		if (bIsZoomed) ShowWindow(ghwndApp, SW_RESTORE);
-		SetWindowLong(ghwndApp, GWL_STYLE, WS_POPUP);
-		ShowWindow(ghwndApp, SW_SHOWMAXIMIZED);				
-		ShowCursor(FALSE);
-		SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
-	}
-	else
-	{
-		ShowWindow(ghwndStatus, SW_SHOW);
-		SetMenu(ghwndApp,ghmenuApp);		
-		ShowWindow(ghwndApp, SW_RESTORE);
-		SetWindowLong(ghwndApp, GWL_STYLE, ghwndStyle);
-		if (bIsZoomed) ShowWindow(ghwndApp, SW_MAXIMIZE);
-		ShowCursor(TRUE);
-		SetThreadExecutionState(ES_CONTINUOUS);
-		// Trigger WM_SIZE message
-		RECT Rc;
-		GetWindowRect(ghwndApp, &Rc);
-		SetWindowPos(ghwndApp, HWND_TOP, Rc.left,Rc.top, (Rc.right-Rc.left),(Rc.bottom-Rc.top), SWP_FRAMECHANGED);
-	}
-}
 
 // Tear down everything downstream of a given filter
 void NukeDownstream(IBaseFilter *pf)
@@ -1132,7 +1014,7 @@ void TearDownGraph()
     // if (gcap.pFg) DumpGraph(gcap.pFg, 1);
 
 #ifdef REGISTER_FILTERGRAPH
-    // Remove filter graph from the running object table   
+    // Remove filter graph from the running object table
     if(g_dwGraphRegister)
     {
         RemoveGraphFromRot(g_dwGraphRegister);
@@ -1182,7 +1064,7 @@ BOOL InitCapFilters()
             hr = pBag->Read(L"FriendlyName", &var, NULL);
             if(hr == NOERROR)
             {
-                lstrcpyW(gcap.wachFriendlyName, var.bstrVal);
+                hr = StringCchCopyW(gcap.wachFriendlyName, sizeof(gcap.wachFriendlyName) / sizeof(gcap.wachFriendlyName[0]), var.bstrVal);
                 SysFreeString(var.bstrVal);
             }
 
@@ -1234,12 +1116,12 @@ BOOL InitCapFilters()
     // until the pin is connected, or it may not be available at all.
     // (eg: interface may not be available for some DV capture)
     hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE,
-                                      &MEDIATYPE_Interleaved, gcap.pVCap, 
+                                      &MEDIATYPE_Interleaved, gcap.pVCap,
                                       IID_IAMVideoCompression, (void **)&gcap.pVC);
     if(hr != S_OK)
     {
         hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE,
-                                          &MEDIATYPE_Video, gcap.pVCap, 
+                                          &MEDIATYPE_Video, gcap.pVCap,
                                           IID_IAMVideoCompression, (void **)&gcap.pVC);
     }
 
@@ -1265,25 +1147,6 @@ BOOL InitCapFilters()
 
     AM_MEDIA_TYPE *pmt;
 
-	// set inital capture format
-	hr = gcap.pVSC->GetFormat(&pmt);
-
-    // DV capture does not use a VIDEOINFOHEADER
-    if(hr == NOERROR)
-    {
-        if(pmt->formattype == FORMAT_VideoInfo)
-        {
-            VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER *)pmt->pbFormat;
-            pvi->AvgTimePerFrame = (LONGLONG)(10000000 / gcap.FrameRate);
-			pvi->bmiHeader.biWidth = gcap.CaptureWidth;
-			pvi->bmiHeader.biHeight = gcap.CaptureHeight;
-
-            hr = gcap.pVSC->SetFormat(pmt);
-            if(hr != NOERROR)
-                ErrMsg(TEXT("%x: Cannot set frame rate or resolution for preview"), hr);
-        }
-    }
-
     // default capture format
     if(gcap.pVSC && gcap.pVSC->GetFormat(&pmt) == S_OK)
     {
@@ -1298,7 +1161,7 @@ BOOL InitCapFilters()
         {
             // This capture filter captures something other that pure video.
             // Maybe it's DV or something?  Anyway, chances are we shouldn't
-            // allow capturing audio separately, since our video capture    
+            // allow capturing audio separately, since our video capture
             // filter may have audio combined in it already!
             gcap.fCapAudioIsRelevant = FALSE;
             gcap.fCapAudio = FALSE;
@@ -1329,7 +1192,7 @@ BOOL InitCapFilters()
         gcap.pCrossbar = NULL;
 
         if(SUCCEEDED(gcap.pVCap->EnumPins(&pins)))
-        {            
+        {
             while(!Found && (S_OK == pins->Next(1, &pP, &n)))
             {
                 if(S_OK == pP->QueryPinInfo(&pinInfo))
@@ -1356,7 +1219,7 @@ BOOL InitCapFilters()
                             gcap.pCrossbar = new CCrossbar(pP, &hrCreate);
                             if (!gcap.pCrossbar || FAILED(hrCreate))
                                 break;
-                                
+
                             hr = gcap.pCrossbar->GetInputCount(&gcap.NumberOfVideoInputs);
                             Found = TRUE;
                         }
@@ -1419,7 +1282,7 @@ BOOL InitCapFilters()
             hr = pBag->Read(L"FriendlyName", &var, NULL);
             if(hr == NOERROR)
             {
-                lstrcpyW(wachAudioFriendlyName, var.bstrVal);
+                hr = StringCchCopyW(wachAudioFriendlyName, 256, var.bstrVal);
                 SysFreeString(var.bstrVal);
             }
 
@@ -1441,7 +1304,7 @@ BOOL InitCapFilters()
 
     // !!! What if this interface isn't supported?
     // we use this interface to set the captured wave format
-    hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, gcap.pACap, 
+    hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, gcap.pACap,
                                       IID_IAMStreamConfig, (void **)&gcap.pASC);
 
     if(hr != NOERROR)
@@ -1618,7 +1481,7 @@ BOOL BuildCaptureGraph()
 
         if(gcap.fWantPreview)
         {
-            hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Interleaved, 
+            hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Interleaved,
                                             gcap.pVCap, NULL, NULL);
             if(hr == VFW_S_NOPREVIEWPIN)
             {
@@ -1627,7 +1490,7 @@ BOOL BuildCaptureGraph()
             }
             else if(hr != S_OK)
             {
-                hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Video, 
+                hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Video,
                                                  gcap.pVCap, NULL, NULL);
                 if(hr == VFW_S_NOPREVIEWPIN)
                 {
@@ -1661,7 +1524,7 @@ BOOL BuildCaptureGraph()
 
     if(!gcap.fMPEG2 && gcap.fCapAudio)
     {
-        hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, 
+        hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio,
                                          gcap.pACap, NULL, gcap.pRender);
         if(hr != NOERROR)
         {
@@ -1701,7 +1564,7 @@ BOOL BuildCaptureGraph()
     // Get the preview window to be a child of our app's window
     //
 
-    // This will find the IVideoWindow interface on the renderer.  It is 
+    // This will find the IVideoWindow interface on the renderer.  It is
     // important to ask the filtergraph for this interface... do NOT use
     // ICaptureGraphBuilder2::FindInterface, because the filtergraph needs to
     // know we own the window so it can give us display changed messages, etc.
@@ -1792,10 +1655,10 @@ SetupCaptureFail:
 // build the preview graph!
 //
 // !!! PLEASE NOTE !!!  Some new WDM devices have totally separate capture
-// and preview settings.  An application that wishes to preview and then 
+// and preview settings.  An application that wishes to preview and then
 // capture may have to set the preview pin format using IAMStreamConfig on the
 // preview pin, and then again on the capture pin to capture with that format.
-// In this sample app, there is a separate page to set the settings on the 
+// In this sample app, there is a separate page to set the settings on the
 // capture pin and one for the preview pin.  To avoid the user
 // having to enter the same settings in 2 dialog boxes, an app can have its own
 // UI for choosing a format (the possible formats can be enumerated using
@@ -1899,7 +1762,7 @@ BOOL BuildPreviewGraph()
     // Get the preview window to be a child of our app's window
     //
 
-    // This will find the IVideoWindow interface on the renderer.  It is 
+    // This will find the IVideoWindow interface on the renderer.  It is
     // important to ask the filtergraph for this interface... do NOT use
     // ICaptureGraphBuilder2::FindInterface, because the filtergraph needs to
     // know we own the window so it can give us display changed messages, etc.
@@ -1918,13 +1781,13 @@ BOOL BuildPreviewGraph()
         {
             if(pmtDV->formattype == FORMAT_DvInfo)
             {
-                // in this case we want to set the size of the parent window to that of 
+                // in this case we want to set the size of the parent window to that of
                 // current DV resolution.
                 // We get that resolution from the IVideoWindow.
                 CComQIPtr <IBasicVideo, &IID_IBasicVideo> pBV(gcap.pVW);
 
                 if(pBV != NULL)
-                {   
+                {
                     HRESULT hr1, hr2;
                     long lWidth, lHeight;
 
@@ -1934,14 +1797,13 @@ BOOL BuildPreviewGraph()
                     {
                         ResizeWindow(lWidth, abs(lHeight));
                     }
-                }   
+                }
             }
         }
 
         RECT rc;
         gcap.pVW->put_Owner((OAHWND)ghwndApp);    // We own the window now
         gcap.pVW->put_WindowStyle(WS_CHILD);    // you are now a child
-		gcap.pVW->put_MessageDrain((OAHWND)ghwndApp);
 
         // give the preview window all our space but where the status bar is
         GetClientRect(ghwndApp, &rc);
@@ -1949,8 +1811,32 @@ BOOL BuildPreviewGraph()
         cy = statusGetHeight() + cyBorder;
         rc.bottom -= cy;
 
-        ResizeChild(rc.right, rc.bottom);
+        gcap.pVW->SetWindowPosition(0, 0, rc.right, rc.bottom); // be this big
         gcap.pVW->put_Visible(OATRUE);
+    }
+
+    // now tell it what frame rate to capture at.  Just find the format it
+    // is capturing with, and leave everything alone but change the frame rate
+    // No big deal if it fails.  It's just for preview
+    // !!! Should we then talk to the preview pin?
+    if(gcap.pVSC && gcap.fUseFrameRate)
+    {
+        hr = gcap.pVSC->GetFormat(&pmt);
+
+        // DV capture does not use a VIDEOINFOHEADER
+        if(hr == NOERROR)
+        {
+            if(pmt->formattype == FORMAT_VideoInfo)
+            {
+                VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER *)pmt->pbFormat;
+                pvi->AvgTimePerFrame = (LONGLONG)(10000000 / gcap.FrameRate);
+
+                hr = gcap.pVSC->SetFormat(pmt);
+                if(hr != NOERROR)
+                    ErrMsg(TEXT("%x: Cannot set frame rate for preview"), hr);
+            }
+            DeleteMediaType(pmt);
+        }
     }
 
     // make sure we process events while we're previewing!
@@ -1993,10 +1879,10 @@ BOOL StartPreview()
 
     // run the graph
     IMediaControl *pMC = NULL;
-    HRESULT hr = gcap.pFg->QueryInterface(IID_IMediaControl, (void **)&pMC);
+    HRESULT hr = gcap.pFg->QueryInterface(IID_IMediaControl, (void **)&pMC);//執行驅動
     if(SUCCEEDED(hr))
     {
-        hr = pMC->Run();
+        hr = pMC->Run();//Run取像
         if(FAILED(hr))
         {
             // stop parts that ran
@@ -2011,9 +1897,6 @@ BOOL StartPreview()
     }
 
     gcap.fPreviewing = TRUE;
-	// if fullscreen require display again
-	if (GetWindowLong(ghwndApp, GWL_STYLE) & WS_POPUP)
-		SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
     return TRUE;
 }
 
@@ -2046,7 +1929,7 @@ BOOL StopPreview()
 
     // get rid of menu garbage
     InvalidateRect(ghwndApp, NULL, TRUE);
-	SetThreadExecutionState(ES_CONTINUOUS);
+
     return TRUE;
 }
 
@@ -2070,7 +1953,7 @@ BOOL StartCapture()
     if(!gcap.fCaptureGraphBuilt)
         return FALSE;
 
-    // This amount will be subtracted from the number of dropped and not 
+    // This amount will be subtracted from the number of dropped and not
     // dropped frames reported by the filter.  Since we might be having the
     // filter running while the pin is turned off, we don't want any of the
     // frame statistics from the time the pin is off interfering with the
@@ -2154,7 +2037,7 @@ BOOL StartCapture()
         {
             gcap.pDF->GetNumDropped(&gcap.lDroppedBase);
             gcap.pDF->GetNumNotDropped(&gcap.lNotBase);
-        } 
+        }
     }
     else
     {
@@ -2232,7 +2115,7 @@ BOOL StopCapture()
 //
 // But you probably want some UI to let the user play with all these settings.
 // For new WDM-style capture devices, we offer some default UI you can use.
-// The code below shows how to bring up all of the dialog boxes supported 
+// The code below shows how to bring up all of the dialog boxes supported
 // by any capture filters.
 //
 // The following code shows you how you can bring up all of the
@@ -2254,7 +2137,7 @@ BOOL StopCapture()
 //     FindInterface(&PIN_CATEGORY_CAPTURE, pACap, IID_IPin, &pX);
 // 6.  The crossbar connected to the video capture filter - get this by calling
 //     FindInterface(NULL, pVCap, IID_IAMCrossbar, &pX);
-// 7.  There is a possible second crossbar to control audio - get this by 
+// 7.  There is a possible second crossbar to control audio - get this by
 //     looking upstream of the first crossbar like this:
 //     FindInterface(&LOOK_UPSTREAM_ONLY, pX, IID_IAMCrossbar, &pX2);
 // 8.  The TV Tuner connected to the video capture filter - get this by calling
@@ -2273,7 +2156,7 @@ BOOL StopCapture()
 //     That would be confusing because if you select an input using dialog 6 or
 //     7 the input list here in #10 won't know about your choice.
 //
-// Your last choice for UI is to make your own pages, and use the results of 
+// Your last choice for UI is to make your own pages, and use the results of
 // your custom page to call the interfaces programmatically.
 
 
@@ -2318,7 +2201,7 @@ void MakeMenuOptions()
             AppendMenu(hMenuSub, MF_STRING, MENU_DIALOG0 + zz, TEXT("Video Format..."));
             gcap.iFormatDialogPos = zz++;
         }
-        hr = gcap.pDlg->HasDialog(VfwCaptureDialog_Source); 
+        hr = gcap.pDlg->HasDialog(VfwCaptureDialog_Source);
         if(SUCCEEDED(hr) && S_FALSE != hr)
         {
             AppendMenu(hMenuSub, MF_STRING, MENU_DIALOG0 + zz, TEXT("Video Source..."));
@@ -2363,11 +2246,11 @@ void MakeMenuOptions()
     // New WDM devices support new UI and new interfaces.
     // Your app can use some default property
     // pages for UI if you'd like (like we do here) or if you don't like our
-    // dialog boxes, feel free to make your own and programmatically set 
+    // dialog boxes, feel free to make your own and programmatically set
     // the capture options through interfaces like IAMCrossbar, IAMCameraControl
     // etc.
 
-    // There are 9 objects that might support property pages.  
+    // There are 9 objects that might support property pages.
     // Let's go through them.
 
     ISpecifyPropertyPages *pSpec;
@@ -2505,7 +2388,7 @@ void MakeMenuOptions()
     // 6.  The TVTuner
 
     IAMTVTuner *pTV;
- 
+
     hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE,
                                       &MEDIATYPE_Interleaved, gcap.pVCap,
                                       IID_IAMTVTuner, (void **)&pTV);
@@ -2561,7 +2444,7 @@ void MakeMenuOptions()
     // 9.  The TV Audio filter
 
     IAMTVAudio *pTVA;
-    hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE, 
+    hr = gcap.pBuilder->FindInterface(&PIN_CATEGORY_CAPTURE,
                                       &MEDIATYPE_Audio, gcap.pACap,
                                       IID_IAMTVAudio, (void **)&pTVA);
     if(SUCCEEDED(hr))
@@ -2614,7 +2497,7 @@ void MakeMenuOptions()
         {
             InputToEnable = 0;
         }
-        CheckMenuItem(gcap.hMenuPopup, InputToEnable, MF_BYPOSITION | MF_CHECKED); 
+        CheckMenuItem(gcap.hMenuPopup, InputToEnable, MF_BYPOSITION | MF_CHECKED);
 
         gcap.pCrossbar->SetInputIndex(InputToEnable);
     }
@@ -2663,8 +2546,8 @@ void UpdateStatus(BOOL fAllStats)
     if(!fAllStats)
     {
         LONG lTime = timeGetTime() - gcap.lCapStartTime;
-        wsprintf(tach, TEXT("Captured %d frames (%d dropped) %d.%dsec\0"), lNot,
-                 lDropped, lTime / 1000, 
+        hr = StringCchPrintf(tach, 160, TEXT("Captured %d frames (%d dropped) %d.%dsec\0"), lNot,
+                 lDropped, lTime / 1000,
                  lTime / 100 - lTime / 1000 * 10);
         statusUpdateStatus(ghwndStatus, tach);
         return;
@@ -2699,7 +2582,7 @@ void UpdateStatus(BOOL fAllStats)
         lData = 0;
     }
 
-    wsprintf(tach, TEXT("Captured %d frames in %d.%d sec (%d dropped): %d.%d fps %d.%d Meg/sec\0"),
+    hr = StringCchPrintf(tach, 160, TEXT("Captured %d frames in %d.%d sec (%d dropped): %d.%d fps %d.%d Meg/sec\0"),
              lNot, lDurMS / 1000, lDurMS / 100 - lDurMS / 1000 * 10,
              lDropped, (int)flFrame,
              (int)(flFrame * 10.) - (int)flFrame * 10,
@@ -2749,7 +2632,7 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
         InitCapFilters();
 
         if(gcap.fWantPreview)   // were we previewing?
-        { 
+        {
             BuildPreviewGraph();
             StartPreview();
         }
@@ -2764,9 +2647,9 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
         if(gcap.rgpmVideoMenu[i] == NULL)
             break;
 
-        CheckMenuItem(GetMenu(ghwndApp), 
-            MENU_VDEVICE0 + i, 
-            (S_OK == gcap.rgpmVideoMenu[i]->IsEqual(gcap.pmVideo)) ? MF_CHECKED : MF_UNCHECKED); 
+        CheckMenuItem(GetMenu(ghwndApp),
+            MENU_VDEVICE0 + i,
+            (S_OK == gcap.rgpmVideoMenu[i]->IsEqual(gcap.pmVideo)) ? MF_CHECKED : MF_UNCHECKED);
     }
 
     for(i = 0; i < NUMELMS(gcap.rgpmAudioMenu); i++)
@@ -2774,8 +2657,8 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
         if(gcap.rgpmAudioMenu[i] == NULL)
             break;
 
-        CheckMenuItem(GetMenu(ghwndApp), MENU_ADEVICE0 + i, 
-            (S_OK == gcap.rgpmAudioMenu[i]->IsEqual(gcap.pmAudio)) ? MF_CHECKED : MF_UNCHECKED); 
+        CheckMenuItem(GetMenu(ghwndApp), MENU_ADEVICE0 + i,
+            (S_OK == gcap.rgpmAudioMenu[i]->IsEqual(gcap.pmAudio)) ? MF_CHECKED : MF_UNCHECKED);
     }
 
     // Put the video driver name in the status bar - if the filter supports
@@ -2793,7 +2676,7 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
             // are empty, just display the device's friendly name.
             if(wcslen(wachDesc) && wcslen(wachVer))
             {
-                wsprintf(tachStatus, TEXT("%s - %s\0"), W2T(wachDesc), W2T(wachVer));
+                hr = StringCchPrintf(tachStatus, VERSIZE + DESCSIZE + 5, TEXT("%s - %s\0"), W2T(wachDesc), W2T(wachVer));
                 statusUpdateStatus(ghwndStatus, tachStatus);
                 return;
             }
@@ -2954,7 +2837,7 @@ void AddDevicesToMenu()
                 if(gcap.pmVideo != 0 && (S_OK == gcap.pmVideo->IsEqual(pM)))
                     bCheck = TRUE;
 
-                CheckMenuItem(hMenuSub,  MENU_VDEVICE0 + uIndex, 
+                CheckMenuItem(hMenuSub,  MENU_VDEVICE0 + uIndex,
                     (bCheck ? MF_CHECKED : MF_UNCHECKED));
                 EnableMenuItem(hMenuSub, MENU_VDEVICE0 + uIndex,
                     (gcap.fCapturing ? MF_DISABLED : MF_ENABLED));
@@ -3010,7 +2893,7 @@ EnumAudio:
                 if(gcap.pmAudio != 0 && (S_OK == gcap.pmAudio->IsEqual(pM)))
                     bCheck = TRUE;
 
-                CheckMenuItem(hMenuSub,  MENU_ADEVICE0 + uIndex, 
+                CheckMenuItem(hMenuSub,  MENU_ADEVICE0 + uIndex,
                     (bCheck ? MF_CHECKED : MF_UNCHECKED));
                 EnableMenuItem(hMenuSub, MENU_ADEVICE0 + uIndex,
                     (gcap.fCapturing ? MF_DISABLED : MF_ENABLED));
@@ -3020,7 +2903,7 @@ EnumAudio:
 
                 ASSERT(gcap.rgpmAudioMenu[uIndex] == 0);
                 gcap.rgpmAudioMenu[uIndex] = pM;
-                pM->AddRef();                
+                pM->AddRef();
             }
             pBag->Release();
         }
@@ -3153,6 +3036,7 @@ void ChooseAudioFormat()
     DeleteMediaType(pmt);
 }
 
+
 /*----------------------------------------------------------------------------*\
 |    AppCommand()
 |
@@ -3168,7 +3052,7 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
         // Our about box
         //
         case MENU_ABOUT:
-            DialogBox(ghInstApp, MAKEINTRESOURCE(IDD_ABOUT), hwnd, 
+            DialogBox(ghInstApp, MAKEINTRESOURCE(IDD_ABOUT), hwnd,
                 (DLGPROC)AboutDlgProc);
             break;
 
@@ -3228,7 +3112,7 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
             break;
 
         // toggle preview
-        // 
+        //
         case MENU_PREVIEW:
             gcap.fWantPreview = !gcap.fWantPreview;
             if(gcap.fWantPreview)
@@ -3395,7 +3279,7 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
                 hrD = gcap.pDlg->ShowDialog(VfwCaptureDialog_Format, ghwndApp);
 
                 // Sometimes bringing up the FORMAT dialog can result
-                // in changing to a capture format that the current graph 
+                // in changing to a capture format that the current graph
                 // can't handle.  It looks like that has happened and we'll
                 // have to rebuild the graph.
                 if(hrD == VFW_E_CANNOT_CONNECT)
@@ -3475,8 +3359,8 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
             else if(id - MENU_DIALOG0 == gcap.iVCapCapturePinDialogPos)
             {
                 // You can change this pin's output format in these dialogs.
-                // If the capture pin is already connected to somebody who's 
-                // fussy about the connection type, that may prevent using 
+                // If the capture pin is already connected to somebody who's
+                // fussy about the connection type, that may prevent using
                 // this dialog(!) because the filter it's connected to might not
                 // allow reconnecting to a new format. (EG: you switch from RGB
                 // to some compressed type, and need to pull in a decoder)
@@ -3555,7 +3439,7 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
             {
                 // this dialog may not work if the preview pin is connected
                 // already, because the downstream filter may reject a format
-                // change, so we better kill the graph. (EG: We switch from 
+                // change, so we better kill the graph. (EG: We switch from
                 // capturing RGB to some compressed fmt, and need to pull in
                 // a decompressor)
                 if(gcap.fWantPreview)
@@ -3780,15 +3664,15 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
                 }
                 pTVA->Release();
             }
-            else if(((id - MENU_DIALOG0) >  gcap.iVideoInputMenuPos) && 
+            else if(((id - MENU_DIALOG0) >  gcap.iVideoInputMenuPos) &&
                 (id - MENU_DIALOG0) <= gcap.iVideoInputMenuPos + gcap.NumberOfVideoInputs)
             {
                 // Remove existing checks
                 for(int j = 0; j < gcap.NumberOfVideoInputs; j++)
                 {
-                    CheckMenuItem(gcap.hMenuPopup, j, MF_BYPOSITION | 
+                    CheckMenuItem(gcap.hMenuPopup, j, MF_BYPOSITION |
                         ((j == (id - MENU_DIALOG0) - gcap.iVideoInputMenuPos - 1) ?
-                        MF_CHECKED : MF_UNCHECKED )); 
+                        MF_CHECKED : MF_UNCHECKED ));
                 }
 
                 if(gcap.pCrossbar)
@@ -3802,6 +3686,7 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
     }
     return 0L;
 }
+
 
 /*----------------------------------------------------------------------------*\
 |   ErrMsg - Opens a Message box with a error message in it.  The user can     |
@@ -3819,13 +3704,13 @@ void ErrMsg(LPTSTR szFormat,...)
 
     // Use a bounded buffer size to prevent buffer overruns.  Limit count to
     // character size minus one to allow for a NULL terminating character.
-    _vsntprintf(szBuffer, NUMCHARS - 1, szFormat, pArgs);
+    HRESULT hr = StringCchVPrintf(szBuffer, NUMCHARS - 1, szFormat, pArgs);
     va_end(pArgs);
 
     // Ensure that the formatted string is NULL-terminated
     szBuffer[LASTCHAR] = TEXT('\0');
 
-    MessageBox(ghwndApp, szBuffer, NULL, 
+    MessageBox(ghwndApp, szBuffer, NULL,
                MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
 }
 
@@ -3908,11 +3793,11 @@ BOOL OpenFileDialog(HWND hWnd, LPTSTR pszName, int cb)
 
     // start with capture file as current file name
     szFileName[0] = 0;
-    lstrcpyn(szFileName, gcap.szCaptureFile, NUMELMS(szFileName));
+    (void)StringCchCopy(szFileName, NUMELMS(szFileName), gcap.szCaptureFile);
 
     // Get just the path info
     // Terminate the full path at the last backslash
-    lstrcpyn(szBuffer, szFileName, NUMELMS(szBuffer));
+    (void)StringCchCopy(szBuffer, NUMELMS(szBuffer), szFileName);
     for(p = szBuffer + lstrlen(szBuffer); p > szBuffer; p--)
     {
         if(*p == '\\')
@@ -3967,7 +3852,7 @@ BOOL SetCaptureFile(HWND hWnd)
 #ifdef UNICODE
         // Convert Multibyte string to ANSI
         char szCaptureFile[STR_MAX_LENGTH];
-        int rc = WideCharToMultiByte(CP_ACP, 0, gcap.szCaptureFile, -1, 
+        int rc = WideCharToMultiByte(CP_ACP, 0, gcap.szCaptureFile, -1,
                                      szCaptureFile, STR_MAX_LENGTH, NULL, NULL);
 #else
         TCHAR *szCaptureFile = gcap.szCaptureFile;
@@ -4048,7 +3933,7 @@ BOOL SaveCaptureFile(HWND hWnd)
         else
             statusUpdateStatus(ghwndStatus, TEXT("Capture file save ERROR"));
 
-        return (hr == NOERROR ? TRUE : FALSE); 
+        return (hr == NOERROR ? TRUE : FALSE);
     }
     else
     {
@@ -4111,15 +3996,15 @@ HMODULE UtilLoadLibrary(LPCTSTR lpFileName)
     {
         // Now we have the Windows/System path with enough space left
         // to add the libary name and a terminating NULL character
-        lstrcat(szFullPath, TEXT("\\\0"));
-        lstrcat(szFullPath, lpFileName);
-        lstrcat(szFullPath, TEXT("\0"));
+        HRESULT hr = StringCchCat(szFullPath, MAX_PATH, TEXT("\\\0"));
+        hr = StringCchCat(szFullPath, MAX_PATH, lpFileName);
+        hr = StringCchCat(szFullPath, MAX_PATH, TEXT("\0"));
         fSuccess = TRUE;
     }
 
     if(!fSuccess)
     {
-        // An error occurred, so fallback to the default behavior by using 
+        // An error occurred, so fallback to the default behavior by using
         // the NULL-terminated library name provided as a parameter.
         lstrcpyn(szFullPath, lpFileName, NUMELMS(szFullPath)-1);
         szFullPath[MAX_PATH - 1] = TEXT('\0');
@@ -4140,7 +4025,10 @@ static long GetFreeDiskSpaceInKB(LPTSTR pFile)
     ULARGE_INTEGER ulA, ulB, ulFreeBytes;
 
     // need to find path for root directory on drive containing this file.
-    GetFullPathName(pFile, NUMELMS(RootName), RootName, &ptmp);
+    if (0 == GetFullPathName(pFile, NUMELMS(RootName), RootName, &ptmp))
+    {
+        return -1;
+    }
 
     // truncate this to the name of the root directory (how tedious)
     if(RootName[0] == '\\' && RootName[1] == '\\')
@@ -4315,7 +4203,7 @@ int FAR PASCAL AllocCapFileProc(HWND hDlg, UINT Message, UINT wParam, LONG lPara
                     }
                     if(bchanged)
                     {
-                        wsprintf(tachBuffer, TEXT("%ld\0"), l);
+                        HRESULT hr = StringCchPrintf(tachBuffer, 21, TEXT("%ld\0"), l);
                         SetDlgItemText(hDlg, IDD_SetCapFileSize, tachBuffer);
                     }
                     break;
@@ -4335,12 +4223,13 @@ int FAR PASCAL FrameRateProc(HWND hwnd, UINT msg, UINT wParam, LONG lParam)
 {
     TCHAR  tach[32];
     USES_CONVERSION;
+    HRESULT hr;
 
     switch(msg)
     {
         case WM_INITDIALOG:
             /* put the current frame rate in the box */
-            wsprintf(tach, TEXT("%d\0"), (int) gcap.FrameRate);
+            hr = StringCchPrintf(tach, 32, TEXT("%d\0"), (int) gcap.FrameRate);
             SetDlgItemText(hwnd, IDC_FRAMERATE, tach);
             CheckDlgButton(hwnd, IDC_USEFRAMERATE, gcap.fUseFrameRate);
             break;
@@ -4361,7 +4250,7 @@ int FAR PASCAL FrameRateProc(HWND hwnd, UINT msg, UINT wParam, LONG lParam)
 
                 // Convert Multibyte string to ANSI
                 char szANSI[STR_MAX_LENGTH];
-                rc = WideCharToMultiByte(CP_ACP, 0, tach, -1, szANSI, 
+                rc = WideCharToMultiByte(CP_ACP, 0, tach, -1, szANSI,
                     STR_MAX_LENGTH, NULL, NULL);
                 double frameRate = atof(szANSI);
 #else
@@ -4396,12 +4285,13 @@ int FAR PASCAL TimeLimitProc(HWND hwnd, UINT msg, UINT wParam, LONG lParam)
 {
     TCHAR   tach[32];
     DWORD   dwTimeLimit;
+    HRESULT hr;
 
     switch(msg)
     {
         case WM_INITDIALOG:
             /* put the current time limit info in the boxes */
-            wsprintf(tach, TEXT("%d\0"), gcap.dwTimeLimit);
+            hr = StringCchPrintf(tach, 32, TEXT("%d\0"), gcap.dwTimeLimit);
             SetDlgItemText(hwnd, IDC_TIMELIMIT, tach);
             CheckDlgButton(hwnd, IDC_USETIMELIMIT, gcap.fUseTimeLimit);
             break;
@@ -4436,12 +4326,13 @@ int FAR PASCAL TimeLimitProc(HWND hwnd, UINT msg, UINT wParam, LONG lParam)
 int FAR PASCAL PressAKeyProc(HWND hwnd, UINT msg, UINT wParam, LONG lParam)
 {
     TCHAR tach[_MAX_PATH];
+    HRESULT hr;
 
     switch(msg)
     {
         case WM_INITDIALOG:
             /* set the current file name in the box */
-            wsprintf(tach, TEXT("%s\0"), gcap.szCaptureFile);
+            hr = StringCchPrintf(tach, _MAX_PATH, TEXT("%s\0"), gcap.szCaptureFile);
             SetDlgItemText(hwnd, IDC_CAPFILENAME, tach);
             break;
 
@@ -4475,10 +4366,14 @@ DWORDLONG GetSize(LPCTSTR tach)
         return 0;
     }
 
-    DWORD dwSizeHigh;
-    DWORD dwSizeLow = GetFileSize(hFile, &dwSizeHigh);
+    DWORDLONG dwlSize = 0;
+    DWORD dwSizeHigh = 0;
 
-    DWORDLONG dwlSize = dwSizeLow + ((DWORDLONG)dwSizeHigh << 32);
+    DWORD dwSizeLow = GetFileSize(hFile, &dwSizeHigh);
+    if (INVALID_FILE_SIZE != dwSizeLow)
+    {
+        dwlSize = dwSizeLow + ((DWORDLONG)dwSizeHigh << 32);
+    }
 
     if(!CloseHandle(hFile))
     {
@@ -4488,33 +4383,10 @@ DWORDLONG GetSize(LPCTSTR tach)
     return dwlSize;
 }
 
-void ReadVideoPin()
-{
-	// read video pin settings
-	HRESULT hr=S_OK;
-	AM_MEDIA_TYPE *pmt;
-	hr = gcap.pVSC->GetFormat(&pmt);
-
-    // DV capture does not use a VIDEOINFOHEADER
-    if(hr == NOERROR)
-    {
-        if(pmt->formattype == FORMAT_VideoInfo)
-        {
-            VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER *)pmt->pbFormat;
-			gcap.FrameRate = (LONGLONG)(10000000 / pvi->AvgTimePerFrame);
-			gcap.CaptureWidth = pvi->bmiHeader.biWidth;
-			gcap.CaptureHeight = pvi->bmiHeader.biHeight;
-        }
-    }
-	DeleteMediaType(pmt);
-}
-
 void OnClose()
 {
     TCHAR szBuf[512];
     WCHAR *wszDisplayName = NULL;
-
-	ReadVideoPin();
 
     // Unregister device notifications
     if(ghDevNotify != NULL)
@@ -4543,7 +4415,7 @@ void OnClose()
     if(gcap.pmVideo)
     {
         if(SUCCEEDED(gcap.pmVideo->GetDisplayName(0, 0, &wszDisplayName)))
-        {   
+        {
             if(wszDisplayName)
             {
                 USES_CONVERSION;
@@ -4558,7 +4430,7 @@ void OnClose()
 
     wszDisplayName = 0;
     szBuf[0] = NULL;
-    
+
     if(gcap.pmAudio)
     {
         if(SUCCEEDED(gcap.pmAudio->GetDisplayName(0, 0, &wszDisplayName)))
@@ -4566,7 +4438,7 @@ void OnClose()
             if(wszDisplayName)
             {
                 USES_CONVERSION;
-                _tcsncpy(szBuf, W2T(wszDisplayName), NUMELMS(szBuf));
+                (void)StringCchCopy(szBuf, NUMELMS(szBuf), W2T(wszDisplayName) );
                 CoTaskMemFree(wszDisplayName);
             }
         }
@@ -4576,34 +4448,28 @@ void OnClose()
     WriteProfileString(TEXT("annie"), TEXT("AudioDevice2"), szBuf);
 
     // Save the integer settings
-    wsprintf(szBuf, TEXT("%d"), (int)(10000000 / gcap.FrameRate));
+    HRESULT hr = StringCchPrintf(szBuf, 512, TEXT("%d"), (int)(10000000 / gcap.FrameRate));
     WriteProfileString(TEXT("annie"), TEXT("FrameRate"), szBuf);
 
-	wsprintf(szBuf, TEXT("%d"), gcap.CaptureWidth);
-	WriteProfileString(TEXT("annie"), TEXT("CaptureWidth"), szBuf);
-
-	wsprintf(szBuf, TEXT("%d"), gcap.CaptureHeight);
-	WriteProfileString(TEXT("annie"), TEXT("CaptureHeight"), szBuf);
-
-    wsprintf(szBuf, TEXT("%d"), gcap.fUseFrameRate);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.fUseFrameRate);
     WriteProfileString(TEXT("annie"), TEXT("UseFrameRate"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.fCapAudio);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.fCapAudio);
     WriteProfileString(TEXT("annie"), TEXT("CaptureAudio"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.fCapCC);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.fCapCC);
     WriteProfileString(TEXT("annie"), TEXT("CaptureCC"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.fWantPreview);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.fWantPreview);
     WriteProfileString(TEXT("annie"), TEXT("WantPreview"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.iMasterStream);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.iMasterStream);
     WriteProfileString(TEXT("annie"), TEXT("MasterStream"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.fUseTimeLimit);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.fUseTimeLimit);
     WriteProfileString(TEXT("annie"), TEXT("UseTimeLimit"), szBuf);
 
-    wsprintf(szBuf, TEXT("%d"), gcap.dwTimeLimit);
+    hr = StringCchPrintf(szBuf, 512, TEXT("%d"), gcap.dwTimeLimit);
     WriteProfileString(TEXT("annie"), TEXT("TimeLimit"), szBuf);
 }
 
@@ -4624,7 +4490,7 @@ HRESULT AddGraphToRot(IUnknown *pUnkGraph, DWORD *pdwRegister)
     if(FAILED(GetRunningObjectTable(0, &pROT)))
         return E_FAIL;
 
-    wsprintfW(wsz, L"FilterGraph %08x pid %08x\0", (DWORD_PTR)pUnkGraph, 
+    hr = StringCchPrintfW(wsz, 128, L"FilterGraph %08x pid %08x\0", (DWORD_PTR)pUnkGraph,
         GetCurrentProcessId());
 
     hr = CreateItemMoniker(L"!", wsz, &pMoniker);
@@ -4635,10 +4501,10 @@ HRESULT AddGraphToRot(IUnknown *pUnkGraph, DWORD *pdwRegister)
         // registered until it is explicitly revoked with the Revoke() method.
         //
         // Not using this flag means that if GraphEdit remotely connects
-        // to this graph and then GraphEdit exits, this object registration 
+        // to this graph and then GraphEdit exits, this object registration
         // will be deleted, causing future attempts by GraphEdit to fail until
         // this application is restarted or until the graph is registered again.
-        hr = pROT->Register(ROTFLAGS_REGISTRATIONKEEPSALIVE, pUnkGraph, 
+        hr = pROT->Register(ROTFLAGS_REGISTRATIONKEEPSALIVE, pUnkGraph,
                             pMoniker, pdwRegister);
         pMoniker->Release();
     }
