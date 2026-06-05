@@ -16,7 +16,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <stdio.h>
-#include <commdlg.h>
+#include <commdlg.h> // for video file dialog
+#include <shlobj.h>  // for img path dialog
 #include <atlbase.h>
 #include <strsafe.h>
 #include "stdafx.h"
@@ -217,15 +218,15 @@ void RemoveGraphFromRot(DWORD pdwRegister);
 // Name: SetAppCaption()
 // Desc: Set the caption to be the application name followed by the capture file
 //------------------------------------------------------------------------------
-void SetAppCaption()
+void SetAppCaption(TCHAR *cap)
 {
     TCHAR tach[_MAX_PATH + 80];
 
     lstrcpyn(tach, gszAppName, NUMELMS(tach));
-    if(gcap.szCaptureFile[0] != 0)
+    if(cap[0] != 0)
     {
         HRESULT hr = StringCchCat(tach, _MAX_PATH + 80, TEXT(" - "));
-        hr = StringCchCat(tach, _MAX_PATH + 80, gcap.szCaptureFile);
+        hr = StringCchCat(tach, _MAX_PATH + 80, cap);
     }
     SetWindowText(ghwndApp, tach);
 }
@@ -343,11 +344,14 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
     AddDevicesToMenu();
 
     // do we want audio?
-    gcap.fCapAudio = GetProfileInt(TEXT("annie"), TEXT("CaptureAudio"), TRUE);
-    gcap.fCapCC    = GetProfileInt(TEXT("annie"), TEXT("CaptureCC"), FALSE);
+    // gcap.fCapAudio = GetProfileInt(TEXT("annie"), TEXT("CaptureAudio"), TRUE);
+    // gcap.fCapCC    = GetProfileInt(TEXT("annie"), TEXT("CaptureCC"), FALSE);
+    gcap.fCapAudio = FALSE;
+    gcap.fCapCC    = FALSE;
 
     // do we want preview?
-    gcap.fWantPreview = GetProfileInt(TEXT("annie"), TEXT("WantPreview"), FALSE);
+    // gcap.fWantPreview = GetProfileInt(TEXT("annie"), TEXT("WantPreview"), FALSE);
+    gcap.fWantPreview = TRUE;
 
     // which stream should be the master? NONE(-1) means nothing special happens
     // AUDIO(1) means the video frame rate is changed before written out to keep
@@ -416,7 +420,7 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
         ASSERT(ghDevNotify != NULL);
     }
 
-    SetAppCaption();
+    SetAppCaption(gcap.szCaptureFile);
     return TRUE;
 }
 
@@ -1879,10 +1883,10 @@ BOOL StartPreview()
 
     // run the graph
     IMediaControl *pMC = NULL;
-    HRESULT hr = gcap.pFg->QueryInterface(IID_IMediaControl, (void **)&pMC);//°õ¦æÅX°Ê
+    HRESULT hr = gcap.pFg->QueryInterface(IID_IMediaControl, (void **)&pMC);
     if(SUCCEEDED(hr))
     {
-        hr = pMC->Run();//Run¨ú¹³
+        hr = pMC->Run();//Runï¿½ï¿½ï¿½ï¿½
         if(FAILED(hr))
         {
             // stop parts that ran
@@ -3068,6 +3072,12 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
             SetCaptureFile(hwnd);
             break;
 
+        // choose a still image capture folder
+        //
+        case MENU_SET_CAP_PATH:
+            SetStillImgCapturePath(hwnd);
+            break;
+
         // pre-allocate the capture file
         //
         case MENU_ALLOC_CAP_FILE:
@@ -3871,7 +3881,7 @@ BOOL SetCaptureFile(HWND hWnd)
         return FALSE;
     }
 
-    SetAppCaption();
+    SetAppCaption(gcap.szCaptureFile);
 
     // tell the file writer to use the new filename
     if(gcap.pSink)
@@ -3879,6 +3889,71 @@ BOOL SetCaptureFile(HWND hWnd)
         gcap.pSink->SetFileName(T2W(gcap.szCaptureFile), NULL);
     }
 
+    return TRUE;
+}
+
+
+/*
+ * Put up the path dialog
+ */
+BOOL PathDialog(HWND hWnd, LPTSTR pszPath, int cb)
+{
+    BROWSEINFO bi;
+    LPITEMIDLIST pidl;
+    BOOL ret = FALSE;
+
+    if (pszPath == NULL || cb <= 0)
+        return ret;
+
+    // initialize BROWSEINFO
+    ZeroMemory(&bi, sizeof(BROWSEINFO));
+    bi.hwndOwner = hWnd;
+    bi.pidlRoot = NULL;
+    bi.pszDisplayName = pszPath;
+    bi.lpszTitle = L"ï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½Â·ï¿½ï¿½";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX;
+    bi.lpfn = NULL;
+    bi.lParam = 0;
+    bi.iImage = 0;
+
+    // path dialog
+    pidl = SHBrowseForFolder(&bi);
+
+    if (pidl != NULL) {
+        // Convert PIDL to string
+        ret = SHGetPathFromIDList(pidl, pszPath);
+        // release PIDL
+        CoTaskMemFree(pidl);
+    }
+    return ret;
+}
+
+/*
+ * Put up a dialog to allow the user to select a still image capture folder.
+ */
+BOOL SetStillImgCapturePath(HWND hWnd)
+{
+    USES_CONVERSION;
+
+    if (PathDialog(hWnd, gcap.stillImgCapturePath, _MAX_PATH)) {
+        OFSTRUCT os;
+
+        // We have a capture file name
+
+        // If this is a new file, then invite the user to
+        // allocate some space
+#ifdef UNICODE
+        // Convert Multibyte string to ANSI
+        char stillImgCapturePath[STR_MAX_LENGTH];
+        int rc = WideCharToMultiByte(CP_ACP, 0, gcap.stillImgCapturePath, -1,
+            stillImgCapturePath, STR_MAX_LENGTH, NULL, NULL);
+#else
+        TCHAR* stillImgCapturePath = gcap.stillImgCapturePath;
+#endif
+    } else {
+        return FALSE;
+    }
+    SetAppCaption(gcap.stillImgCapturePath);
     return TRUE;
 }
 

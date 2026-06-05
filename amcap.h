@@ -86,6 +86,8 @@ typedef PDEV_BROADCAST_DEVICEINTERFACE_A  PDEV_BROADCAST_DEVICEINTERFACE;
 #define MENU_START_CAP      7
 #define MENU_STOP_CAP       8
 #define MENU_CAP_CC         9
+#define MENU_SET_CAP_PATH   10
+#define MENU_IMG_CAP        11 
 #define MENU_CAP_AUDIO      12
 #define MENU_AUDIOFORMAT    13
 #define MENU_FRAMERATE      14
