@@ -60,8 +60,10 @@ DWORD g_dwGraphRegister=0;
 struct _capstuff
 {
     TCHAR szCaptureFile[_MAX_PATH];
+    TCHAR stillImgCapturePath[_MAX_PATH];
     WORD wCapFileSize;  // size in Meg
     ISampleCaptureGraphBuilder *pBuilder;
+    ISampleGrabber *pSG;        // still image grabber
     IVideoWindow *pVW;
     IMediaEventEx *pME;
     IAMDroppedFrames *pDF;
@@ -71,6 +73,7 @@ struct _capstuff
     IAMStreamConfig *pVSC;      // for video cap
     IBaseFilter *pRender;
     IBaseFilter *pVCap, *pACap;
+    IBaseFilter *pSGF;
     IGraphBuilder *pFg;
     IFileSinkFilter *pSink;
     IConfigAviMux *pConfigAviMux;
@@ -178,6 +181,7 @@ BOOL CALLBACK AboutDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void ErrMsg(LPTSTR sz,...);
 
 BOOL SetCaptureFile(HWND hWnd);
+BOOL SetStillImgCapturePath(HWND hWnd);
 BOOL SaveCaptureFile(HWND hWnd);
 BOOL AllocCaptureFile(HWND hWnd);
 
@@ -203,6 +207,7 @@ void FreeCapFilters();
 BOOL StopPreview();
 BOOL StartPreview();
 BOOL StopCapture();
+BOOL CaptureImage();
 
 DWORDLONG GetSize(LPCTSTR tach);
 void MakeMenuOptions();
@@ -321,9 +326,10 @@ BOOL AppInit(HINSTANCE hInst, HINSTANCE hPrev, int sw)
     ShowWindow(ghwndApp,sw);
 
     // Read the capture file name from win.ini
-    GetProfileString(TEXT("annie"), TEXT("CaptureFile"), TEXT(""),
-        gcap.szCaptureFile,
-        NUMELMS(gcap.szCaptureFile));
+    // GetProfileString(TEXT("annie"), TEXT("CaptureFile"), TEXT(""),
+    //     gcap.szCaptureFile,
+    //     NUMELMS(gcap.szCaptureFile));
+    wcscpy_s(gcap.szCaptureFile, TEXT(""));
 
     // Read the list of devices to use from win.ini
     ZeroMemory(gcap.rgpmAudioMenu, sizeof(gcap.rgpmAudioMenu));
@@ -466,6 +472,16 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
     {
         while(PeekMessage(&msg, NULL, 0, 0,PM_REMOVE))
         {
+            if (msg.message == WM_KEYDOWN && msg.wParam == VK_SPACE) {
+                // main windows focus
+                if (GetFocus() == ghwndApp || GetParent(GetFocus()) == ghwndApp) {
+                    if (gcap.fPreviewing && !gcap.fCapturing) {
+                        CaptureImage();
+                        continue; 
+                    }
+                }
+            }
+
             if(msg.message == WM_QUIT)
                 break;  // Leave the PeekMessage while() loop
 
@@ -528,6 +544,10 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             // we can stop capture if it's currently capturing
             EnableMenuItem((HMENU)wParam, MENU_STOP_CAP,
                 (gcap.fCapturing) ? MF_ENABLED : MF_GRAYED);
+
+            // we can capture still image if it's currently previewing
+            EnableMenuItem((HMENU)wParam, MENU_IMG_CAP,
+                (gcap.fPreviewing) ? MF_ENABLED : MF_GRAYED);
 
             // We can bring up a dialog if the graph is stopped
             EnableMenuItem((HMENU)wParam, MENU_DIALOG0, !gcap.fCapturing ?
@@ -693,7 +713,7 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                 for(int i = 0; i < NUMELMS(gcap.rgpmAudioMenu); i++)
                 {
-                        IMonRelease(gcap.rgpmAudioMenu[i]);
+                    IMonRelease(gcap.rgpmAudioMenu[i]);
                 }
             }
 
@@ -991,6 +1011,7 @@ void NukeDownstream(IBaseFilter *pf)
 //
 void TearDownGraph()
 {
+    SAFE_RELEASE(gcap.pSG);
     SAFE_RELEASE(gcap.pSink);
     SAFE_RELEASE(gcap.pConfigAviMux);
     SAFE_RELEASE(gcap.pRender);
@@ -1011,6 +1032,8 @@ void TearDownGraph()
         NukeDownstream(gcap.pVCap);
     if(gcap.pACap)
         NukeDownstream(gcap.pACap);
+    if(gcap.pSGF)
+        NukeDownstream(gcap.pSGF);
     if(gcap.pVCap)
         gcap.pBuilder->ReleaseFilters();
 
@@ -1108,6 +1131,21 @@ BOOL InitCapFilters()
     if(hr != NOERROR)
     {
         ErrMsg(TEXT("Error %x: Cannot add vidcap to filtergraph"), hr);
+        goto InitCapFiltersFail;
+    }
+
+    // Initialize SampleGrabber filter
+    hr = CoCreateInstance(CLSID_SampleGrabber, NULL, CLSCTX_INPROC_SERVER, 
+        IID_IBaseFilter, (void**)&gcap.pSGF);
+    if (FAILED(hr)) {
+        ErrMsg(TEXT("Cannot create SampleGrabber Filter"));
+        goto InitCapFiltersFail;
+    }
+
+    hr = gcap.pFg->AddFilter(gcap.pSGF, L"SampleGrab");
+    if(hr != NOERROR)
+    {
+        ErrMsg(TEXT("Error %x: Cannot add sample grab to filtergraph"), hr);
         goto InitCapFiltersFail;
     }
 
@@ -1356,6 +1394,7 @@ void FreeCapFilters()
         delete gcap.pBuilder;
         gcap.pBuilder = NULL;
     }
+    SAFE_RELEASE(gcap.pSGF);
     SAFE_RELEASE(gcap.pVCap);
     SAFE_RELEASE(gcap.pACap);
     SAFE_RELEASE(gcap.pASC);
@@ -1692,6 +1731,30 @@ BOOL BuildPreviewGraph()
     // we already have another graph built... tear down the old one
     if(gcap.fCaptureGraphBuilt)
         TearDownGraph();
+    
+    // Initialize SampleGrabber
+    hr = gcap.pSGF->QueryInterface(IID_ISampleGrabber, (void**)&gcap.pSG);
+    if (FAILED(hr))
+    {
+        ErrMsg(TEXT("Cannot get ISampleGrabber interface"));
+        return FALSE;
+    }
+
+    // set SampleGrabber to RGB24 format
+    AM_MEDIA_TYPE mt;
+    ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
+    mt.majortype = MEDIATYPE_Video;
+    mt.subtype = MEDIASUBTYPE_RGB24;
+    hr = gcap.pSG->SetMediaType(&mt);
+    if (FAILED(hr))
+    {
+        ErrMsg(TEXT("Cannot set SampleGrabber media type"));
+        return FALSE;
+    }
+    // set one shot
+    gcap.pSG->SetOneShot(FALSE);
+    // set buffer samples
+    gcap.pSG->SetBufferSamples(TRUE);
 
     //
     // Render the preview pin - even if there is not preview pin, the capture
@@ -1707,17 +1770,16 @@ BOOL BuildPreviewGraph()
     if( gcap.fMPEG2 )
     {
         hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW,
-                                         &MEDIATYPE_Stream, gcap.pVCap, NULL, NULL);
+                                         &MEDIATYPE_Stream, gcap.pVCap, gcap.pSGF, NULL);
         if( FAILED( hr ) )
         {
             ErrMsg(TEXT("Cannot build MPEG2 preview graph!"));
         }
-
     }
     else
     {
         hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW,
-                                         &MEDIATYPE_Interleaved, gcap.pVCap, NULL, NULL);
+                                         &MEDIATYPE_Interleaved, gcap.pVCap, gcap.pSGF, NULL);
         if(hr == VFW_S_NOPREVIEWPIN)
         {
             // preview was faked up for us using the (only) capture pin
@@ -1727,7 +1789,7 @@ BOOL BuildPreviewGraph()
         {
             // maybe it's DV?
             hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW,
-                                             &MEDIATYPE_Video, gcap.pVCap, NULL, NULL);
+                                             &MEDIATYPE_Video, gcap.pVCap, gcap.pSGF, NULL);
             if(hr == VFW_S_NOPREVIEWPIN)
             {
                 // preview was faked up for us using the (only) capture pin
@@ -2108,6 +2170,100 @@ BOOL StopCapture()
     InvalidateRect(ghwndApp, NULL, TRUE);
 
     return TRUE;
+}
+
+
+HRESULT WriteBitmap(AM_MEDIA_TYPE mt, TCHAR* path, BYTE *pBuffer, size_t bufferLen)
+{
+    if ((mt.majortype != MEDIATYPE_Video) || (mt.formattype != FORMAT_VideoInfo) ||
+        (mt.cbFormat < sizeof(VIDEOINFOHEADER)) || (mt.pbFormat == NULL))
+    {
+        return E_FAIL;
+    }
+    // get local time
+    SYSTEMTIME st;
+    GetLocalTime(&st); 
+    // complete file path
+    TCHAR szFullFilePath[MAX_PATH];
+    swprintf_s(szFullFilePath, MAX_PATH, 
+        TEXT("%s\\img_%04d_%02d_%02d_%02d_%02d_%02d.bmp"), path, 
+        st.wYear, st.wMonth, st.wDay, 
+        st.wHour, st.wMinute, st.wSecond);
+    HANDLE hf = CreateFile(szFullFilePath, GENERIC_WRITE, FILE_SHARE_WRITE, 
+        NULL, CREATE_ALWAYS, 0, NULL);
+    if (hf == INVALID_HANDLE_VALUE)
+    {
+        return E_FAIL;
+    }
+    long cbBitmapInfoSize = mt.cbFormat - SIZE_PREHEADER;
+    VIDEOINFOHEADER *pVideoHeader = (VIDEOINFOHEADER*)mt.pbFormat;
+
+    BITMAPFILEHEADER bfh;
+    ZeroMemory(&bfh, sizeof(bfh));
+    bfh.bfType = 'MB';  // Little-endian for "BM".
+    bfh.bfSize = sizeof( bfh ) + bufferLen + cbBitmapInfoSize;
+    bfh.bfOffBits = sizeof( BITMAPFILEHEADER ) + cbBitmapInfoSize;
+    
+    // Write the file header.
+    DWORD dwWritten = 0;
+    WriteFile( hf, &bfh, sizeof( bfh ), &dwWritten, NULL );
+    WriteFile( hf, HEADER(pVideoHeader), cbBitmapInfoSize, &dwWritten, NULL );        
+    WriteFile( hf, pBuffer, bufferLen, &dwWritten, NULL );
+    CloseHandle( hf );
+    return S_OK;
+}
+
+
+// still image capture
+//
+BOOL CaptureImage()
+{
+    if (!gcap.pSG || !gcap.pFg) {
+        ErrMsg(TEXT("SampleGrabber not available"));
+        return FALSE;
+    }
+    HRESULT hr = S_OK;
+    // Set path
+    if(!gcap.stillImgCapturePath[0] && !SetStillImgCapturePath(ghwndApp)) {
+        ErrMsg(TEXT("Please select a path for saving capture Image first"));
+        return FALSE;
+    }
+    // Find the required buffer size.
+    long bufferLen;
+    hr = gcap.pSG->GetCurrentBuffer(&bufferLen, NULL);
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+    BYTE *pBuffer = (BYTE*)CoTaskMemAlloc(bufferLen);
+    if (!pBuffer) 
+    {
+        hr = E_OUTOFMEMORY;
+        goto done;
+    }
+
+    hr = gcap.pSG->GetCurrentBuffer(&bufferLen, (long*)pBuffer);
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+    AM_MEDIA_TYPE mt;
+    hr = gcap.pSG->GetConnectedMediaType(&mt);
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+    hr = WriteBitmap(mt, gcap.stillImgCapturePath, pBuffer, bufferLen);
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+done:
+    CoTaskMemFree(pBuffer);
+    return SUCCEEDED(hr);
 }
 
 
@@ -2609,6 +2765,18 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
     WCHAR wachVer[VERSIZE]={0}, wachDesc[DESCSIZE]={0};
     TCHAR tachStatus[VERSIZE + DESCSIZE + 5]={0};
 
+    // // 清理之前的菜单项（修复菜单堆积问题）
+    // HMENU hMenuSub = GetSubMenu(GetMenu(ghwndApp), 2); // Options菜单
+    // if (hMenuSub)
+    // {
+    //     // 删除之前添加的所有菜单项（从索引4开始的那些）
+    //     int menuItemCount = GetMenuItemCount(hMenuSub);
+    //     // 从后往前删除，防止索引变化
+    //     for (int i = menuItemCount - 1; i >= 4; i--)
+    //     {
+    //         RemoveMenu(hMenuSub, i, MF_BYPOSITION);
+    //     }
+    // }
 
     // they chose a new device. rebuild the graphs
     if(gcap.pmVideo != pmVideo || gcap.pmAudio != pmAudio)
@@ -2660,9 +2828,12 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
     {
         if(gcap.rgpmAudioMenu[i] == NULL)
             break;
-
-        CheckMenuItem(GetMenu(ghwndApp), MENU_ADEVICE0 + i,
-            (S_OK == gcap.rgpmAudioMenu[i]->IsEqual(gcap.pmAudio)) ? MF_CHECKED : MF_UNCHECKED);
+        if (gcap.pmAudio) 
+        {
+            CheckMenuItem(GetMenu(ghwndApp), MENU_ADEVICE0 + i,
+                (S_OK == gcap.rgpmAudioMenu[i]->IsEqual(gcap.pmAudio)) ? MF_CHECKED : MF_UNCHECKED);
+    
+        }
     }
 
     // Put the video driver name in the status bar - if the filter supports
@@ -3142,6 +3313,14 @@ LONG PASCAL AppCommand(HWND hwnd, unsigned msg, WPARAM wParam, LPARAM lParam)
             {
                 BuildPreviewGraph();
                 StartPreview();
+            }
+            break;
+
+        // still Img capture
+        //
+        case MENU_IMG_CAP:
+            if (gcap.fPreviewing && !gcap.fCapturing) {
+                CaptureImage();
             }
             break;
 
@@ -3826,7 +4005,7 @@ BOOL OpenFileDialog(HWND hWnd, LPTSTR pszName, int cb)
     ofn.lpstrFile     = szFileName;
     ofn.nMaxFile      = sizeof(szFileName) ;
     ofn.lpstrFileTitle = NULL;
-    ofn.lpstrTitle    = TEXT("Set Capture File");
+    ofn.lpstrTitle    = TEXT("Set image saving path");
     ofn.nMaxFileTitle = 0 ;
     ofn.lpstrInitialDir = szBuffer;
     ofn.Flags = OFN_HIDEREADONLY | OFN_NOREADONLYRETURN | OFN_PATHMUSTEXIST ;

@@ -172,6 +172,7 @@ typedef struct {
 #include <strmctl.h>    // IAMStreamControl support
 #include <edevdefs.h>   // External device control interface defines
 #include <audevcod.h>   // audio filter device error event codes
+#include <qedit.h>
 
 #else
     #ifdef DEBUG
