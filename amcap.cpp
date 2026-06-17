@@ -790,9 +790,48 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             MoveWindow(ghwndStatus, -cxBorder, rc.bottom - cy,
                 rc.right + (2 * cxBorder), cy + cyBorder, TRUE);
             rc.bottom -= cy;
+
+            if (wParam == SIZE_RESTORED && gcap.pVW) 
+            {
+                LONG lVideoLeft, lVideoTop, lVideoWidth=640, lVideoHeight=480;
+                HRESULT hr = gcap.pVW->GetWindowPosition(&lVideoLeft, &lVideoTop, &lVideoWidth, &lVideoHeight);
+
+                if (SUCCEEDED(hr)) 
+                {
+                    // 计算包含标题栏和边框的完整外部窗口尺寸
+                    RECT rcTarget = {0, 0, lVideoWidth, lVideoHeight};
+                    DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
+                    BOOL bHasMenu = GetMenu(hwnd) != NULL;
+                    AdjustWindowRect(&rcTarget, dwStyle, bHasMenu);
+
+                    // 强制将主窗口设置为视频的原始像素大小
+                    SetWindowPos(hwnd, NULL, 0, 0, 
+                                rcTarget.right - rcTarget.left, 
+                                rcTarget.bottom - rcTarget.top, 
+                                SWP_NOMOVE | SWP_NOZORDER);
+                    
+                    // 重新获取客户区大小，以便下面的居中逻辑能正确执行
+                    GetClientRect(ghwndApp, &rc);
+                }
+            }
             // this is the video renderer window showing the preview
-            if(gcap.pVW)
-                gcap.pVW->SetWindowPosition(0, 0, rc.right, rc.bottom);
+            if(gcap.pVW) {
+                LONG lVideoLeft, lVideoTop, lVideoWidth, lVideoHeight;
+                HRESULT hr = gcap.pVW->GetWindowPosition(&lVideoLeft, &lVideoTop, &lVideoWidth, &lVideoHeight);
+                if (SUCCEEDED(hr) && lVideoWidth > 0 && lVideoHeight > 0) {
+                    int clientWidth = rc.right;
+                    int clientHeight = rc.bottom - cy;
+
+                    // calculate offset
+                    int newX = (clientWidth - lVideoWidth) / 2;
+                    int newY = (clientHeight - lVideoHeight) / 2;
+
+                    newX = max(0, newX);
+                    newY = max(0, newY);
+
+                    gcap.pVW->SetWindowPosition(newX, newY, lVideoWidth, lVideoHeight);
+                }
+            }
             break;
 
         case WM_FGNOTIFY:
@@ -844,14 +883,14 @@ LONG WINAPI  AppWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 } // end while
                 if(bAbort)
                 {
-                        if(gcap.fWantPreview)
-                        {
-                            BuildPreviewGraph();
-                            StartPreview();
-                        }
-                        TCHAR szError[100];
-                        HRESULT hr = StringCchPrintf(szError, 100, TEXT("ERROR during capture, error code=%08x\0"), hrAbort);
-                        ErrMsg(szError);
+                    if(gcap.fWantPreview)
+                    {
+                        BuildPreviewGraph();
+                        StartPreview();
+                    }
+                    TCHAR szError[100];
+                    HRESULT hr = StringCchPrintf(szError, 100, TEXT("ERROR during capture, error code=%08x\0"), hrAbort);
+                    ErrMsg(szError);
                 }
             }
             break;
@@ -1142,13 +1181,6 @@ BOOL InitCapFilters()
         goto InitCapFiltersFail;
     }
 
-    hr = gcap.pFg->AddFilter(gcap.pSGF, L"SampleGrab");
-    if(hr != NOERROR)
-    {
-        ErrMsg(TEXT("Error %x: Cannot add sample grab to filtergraph"), hr);
-        goto InitCapFiltersFail;
-    }
-
     // Calling FindInterface below will result in building the upstream
     // section of the capture graph (any WDM TVTuners or Crossbars we might
     // need).
@@ -1185,7 +1217,7 @@ BOOL InitCapFilters()
         }
     }
 
-    gcap.fCapAudioIsRelevant = TRUE;
+    gcap.fCapAudioIsRelevant = FALSE;
 
     AM_MEDIA_TYPE *pmt;
 
@@ -1767,6 +1799,13 @@ BOOL BuildPreviewGraph()
     // the interleaved pin.  Using the Video pin on a DV filter is only useful if
     // you don't want the audio.
 
+    hr = gcap.pFg->AddFilter(gcap.pSGF, L"SampleGrab");
+    if(FAILED(hr))
+    {
+        ErrMsg(TEXT("Error %x: Cannot add sample grab to filtergraph"), hr);
+        return FALSE;
+    }
+
     if( gcap.fMPEG2 )
     {
         hr = gcap.pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW,
@@ -2326,16 +2365,16 @@ void MakeMenuOptions()
     HMENU hMenuSub = GetSubMenu(GetMenu(ghwndApp), 2); // Options menu
 
     // remove any old choices from the last device
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
-    RemoveMenu(hMenuSub, 4, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
+    RemoveMenu(hMenuSub, 2, MF_BYPOSITION);
 
     int zz = 0;
     gcap.iFormatDialogPos = -1;
@@ -2765,19 +2804,6 @@ void ChooseDevices(IMoniker *pmVideo, IMoniker *pmAudio)
     WCHAR wachVer[VERSIZE]={0}, wachDesc[DESCSIZE]={0};
     TCHAR tachStatus[VERSIZE + DESCSIZE + 5]={0};
 
-    // // 清理之前的菜单项（修复菜单堆积问题）
-    // HMENU hMenuSub = GetSubMenu(GetMenu(ghwndApp), 2); // Options菜单
-    // if (hMenuSub)
-    // {
-    //     // 删除之前添加的所有菜单项（从索引4开始的那些）
-    //     int menuItemCount = GetMenuItemCount(hMenuSub);
-    //     // 从后往前删除，防止索引变化
-    //     for (int i = menuItemCount - 1; i >= 4; i--)
-    //     {
-    //         RemoveMenu(hMenuSub, i, MF_BYPOSITION);
-    //     }
-    // }
-
     // they chose a new device. rebuild the graphs
     if(gcap.pmVideo != pmVideo || gcap.pmAudio != pmAudio)
     {
@@ -3039,54 +3065,55 @@ void AddDevicesToMenu()
 
 EnumAudio:
 
-    // enumerate all audio capture devices
-    uIndex = 0;
-    bCheck = FALSE;
+    // // enumerate all audio capture devices
+    // uIndex = 0;
+    // bCheck = FALSE;
 
-    ASSERT(pCreateDevEnum != NULL);
+    // ASSERT(pCreateDevEnum != NULL);
 
-    hr = pCreateDevEnum->CreateClassEnumerator(CLSID_AudioInputDeviceCategory, &pEm, 0);
-    pCreateDevEnum->Release();
-    if(hr != NOERROR)
-        return;
-    pEm->Reset();
+    // hr = pCreateDevEnum->CreateClassEnumerator(CLSID_AudioInputDeviceCategory, &pEm, 0);
+    // pCreateDevEnum->Release();
+    // if(hr != NOERROR)
+    //     return;
+    // pEm->Reset();
 
-    while(hr = pEm->Next(1, &pM, &cFetched), hr==S_OK)
-    {
-        IPropertyBag *pBag;
-        hr = pM->BindToStorage(0, 0, IID_IPropertyBag, (void **)&pBag);
-        if(SUCCEEDED(hr))
-        {
-            VARIANT var;
-            var.vt = VT_BSTR;
-            hr = pBag->Read(L"FriendlyName", &var, NULL);
-            if(hr == NOERROR)
-            {
-                AppendMenu(hMenuSub, MF_STRING, MENU_ADEVICE0 + uIndex,
-                    W2T(var.bstrVal));
+    // while(hr = pEm->Next(1, &pM, &cFetched), hr==S_OK)
+    // {
+    //     IPropertyBag *pBag;
+    //     hr = pM->BindToStorage(0, 0, IID_IPropertyBag, (void **)&pBag);
+    //     if(SUCCEEDED(hr))
+    //     {
+    //         VARIANT var;
+    //         var.vt = VT_BSTR;
+    //         hr = pBag->Read(L"FriendlyName", &var, NULL);
+    //         if(hr == NOERROR)
+    //         {
+    //             AppendMenu(hMenuSub, MF_STRING, MENU_ADEVICE0 + uIndex,
+    //                 W2T(var.bstrVal));
 
-                if(gcap.pmAudio != 0 && (S_OK == gcap.pmAudio->IsEqual(pM)))
-                    bCheck = TRUE;
+    //             if(gcap.pmAudio != 0 && (S_OK == gcap.pmAudio->IsEqual(pM)))
+    //                 bCheck = TRUE;
 
-                CheckMenuItem(hMenuSub,  MENU_ADEVICE0 + uIndex,
-                    (bCheck ? MF_CHECKED : MF_UNCHECKED));
-                EnableMenuItem(hMenuSub, MENU_ADEVICE0 + uIndex,
-                    (gcap.fCapturing ? MF_DISABLED : MF_ENABLED));
-                bCheck = FALSE;
+    //             CheckMenuItem(hMenuSub,  MENU_ADEVICE0 + uIndex,
+    //                 (bCheck ? MF_CHECKED : MF_UNCHECKED));
+    //             EnableMenuItem(hMenuSub, MENU_ADEVICE0 + uIndex,
+    //                 (gcap.fCapturing ? MF_DISABLED : MF_ENABLED));
+    //             bCheck = FALSE;
 
-                SysFreeString(var.bstrVal);
+    //             SysFreeString(var.bstrVal);
 
-                ASSERT(gcap.rgpmAudioMenu[uIndex] == 0);
-                gcap.rgpmAudioMenu[uIndex] = pM;
-                pM->AddRef();
-            }
-            pBag->Release();
-        }
-        pM->Release();
-        uIndex++;
-    }
+    //             ASSERT(gcap.rgpmAudioMenu[uIndex] == 0);
+    //             gcap.rgpmAudioMenu[uIndex] = pM;
+    //             pM->AddRef();
+    //         }
+    //         pBag->Release();
+    //     }
+    //     pM->Release();
+    //     uIndex++;
+    // }
 
-    pEm->Release();
+    // pEm->Release();
+    return;
 }
 
 

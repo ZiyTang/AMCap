@@ -24,42 +24,44 @@ AMCapIcon ICON "amcap.ico"
 ID_APP menu
 BEGIN
     POPUP "&File"
-    BEGIN
-            MENUITEM "Set &Capture File..."         , MENU_SET_CAP_FILE
-            MENUITEM "&Allocate File Space..."      , MENU_ALLOC_CAP_FILE
-            MENUITEM "&Save Captured Video..."      , MENU_SAVE_CAP_FILE
+        BEGIN
+            //MENUITEM "Set &Capture File..."         , MENU_SET_CAP_FILE
+            MENUITEM "Set &Capture Folder"            , MENU_SET_CAP_PATH // still image capture folder
+            //MENUITEM "&Allocate File Space..."      , MENU_ALLOC_CAP_FILE
+            //MENUITEM "&Save Captured Video..."      , MENU_SAVE_CAP_FILE
             MENUITEM SEPARATOR
             MENUITEM "E&xit"                        , MENU_EXIT
         END
     POPUP "&Devices"
         BEGIN
             MENUITEM SEPARATOR
-    END
+        END
     POPUP "&Options"
         BEGIN
             MENUITEM "&Preview"             , MENU_PREVIEW
         MENUITEM SEPARATOR
-            MENUITEM "&MPEG2"               , MENU_MPEG2
-            MENUITEM SEPARATOR
-            MENUITEM "&Audio Format..."     , MENU_AUDIOFORMAT
-            MENUITEM SEPARATOR
+            //MENUITEM "&MPEG2"               , MENU_MPEG2
+            //MENUITEM SEPARATOR
+            //MENUITEM "&Audio Format..."     , MENU_AUDIOFORMAT
+            //MENUITEM SEPARATOR
         /* VIDEO dialogs are created dynamically */
         END
     POPUP "&Capture"
         BEGIN
-            MENUITEM "&Start Capture"       , MENU_START_CAP
-            MENUITEM "Sto&p Capture"        , MENU_STOP_CAP
+            //MENUITEM "&Start Capture"       , MENU_START_CAP
+            //MENUITEM "Sto&p Capture"        , MENU_STOP_CAP
+            MENUITEM "Still Img Capture"    , MENU_IMG_CAP
             MENUITEM SEPARATOR
-            MENUITEM "Capture &Audio"       , MENU_CAP_AUDIO
-            MENUITEM "&Closed Captioning"   , MENU_CAP_CC
-            POPUP    "&Master Stream"
-        BEGIN
-            MENUITEM "&None"                , MENU_NOMASTER
-            MENUITEM "&Audio"               , MENU_AUDIOMASTER
-            MENUITEM "&Video"               , MENU_VIDEOMASTER
-        END
-            MENUITEM "Set &Frame Rate..."   , MENU_FRAMERATE
-            MENUITEM "Set &Time Limit..."   , MENU_TIMELIMIT
+            //MENUITEM "Capture &Audio"       , MENU_CAP_AUDIO
+            //MENUITEM "&Closed Captioning"   , MENU_CAP_CC
+            //POPUP    "&Master Stream"
+        //BEGIN
+        //    MENUITEM "&None"                , MENU_NOMASTER
+        //    MENUITEM "&Audio"               , MENU_AUDIOMASTER
+        //    MENUITEM "&Video"               , MENU_VIDEOMASTER
+        //END
+            //MENUITEM "Set &Frame Rate..."   , MENU_FRAMERATE
+            //MENUITEM "Set &Time Limit..."   , MENU_TIMELIMIT
         END
     POPUP "&Help"
         BEGIN
